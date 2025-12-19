@@ -22,6 +22,7 @@ data/*.jsonl
 data/*.pdf
 *.pdf
 *.csv
+private_brad.txt
 
 # --- Streamlit ---
 .streamlit/*
@@ -31,4 +32,4 @@ data/*.pdf
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db
+Thumbs.db.env

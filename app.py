@@ -1,159 +1,262 @@
 import streamlit as st
-import fitz  # pymupdf
-import pandas as pd
-from datetime import datetime
+import time
 import json
 import os
-import difflib
-from dotenv import load_dotenv
-from openai import OpenAI
+from datetime import datetime
 
-# --- CONFIG & SETUP ---
-load_dotenv(override=True)
-st.set_page_config(page_title="Financial RLHF Studio Pro", layout="wide", page_icon="🧬")
+# --- Imports for Logic ---
+try:
+    import pypdf
+except ImportError:
+    st.error("⚠️ Please install pypdf: `pip install pypdf`")
 
-DATA_FILE = "data/dataset.jsonl"
-if not os.path.exists("data"):
-    os.makedirs("data")
+try:
+    from openai import OpenAI
+except ImportError:
+    st.error("⚠️ Please install openai: `pip install openai`")
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+try:
+    from dotenv import load_dotenv
+    # FORCE OVERRIDE: This ignores the terminal's cache and reads the .env file fresh every time
+    load_dotenv(override=True) 
+except ImportError:
+    pass 
 
-# --- HELPER FUNCTIONS ---
+# --- 1. Page Configuration (Tight & Wide) ---
+st.set_page_config(
+    page_title="Financial RLHF Studio",
+    page_icon="🧬",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-def generate_draft(context_text, prompt):
-    """Generates a response based on the PDF context + User Prompt"""
-    full_prompt = f"Context from Document:\n{context_text[:20000]}...\n\nTask: {prompt}"
+# --- 2. CSS Styling ---
+st.markdown("""
+    <style>
+        .block-container { padding-top: 1rem; padding-bottom: 2rem; }
+        div[data-testid="stVerticalBlock"] > div { gap: 0.5rem; }
+        .stButton button { width: 100%; border-radius: 8px; font-weight: bold;}
+        
+        /* Custom Header Styling */
+        .custom-header {
+            background: linear-gradient(90deg, #0e1117 0%, #262730 100%);
+            padding: 1.5rem;
+            border-radius: 10px;
+            border: 1px solid #444;
+            margin-bottom: 1rem;
+            color: white;
+        }
+        .custom-header h1 {
+            margin: 0;
+            font-size: 2.2rem;
+            font-family: 'Helvetica Neue', sans-serif;
+            font-weight: 700;
+            background: -webkit-linear-gradient(eee, #999);
+            -webkit-background-clip: text;
+        }
+        .custom-header p {
+            margin: 0;
+            font-size: 1rem;
+            color: #aaa;
+            font-style: italic;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 3. Session State & Helper Functions ---
+if "dataset" not in st.session_state:
+    st.session_state.dataset = []
+if "ai_draft" not in st.session_state:
+    st.session_state.ai_draft = ""
+
+def extract_text_from_pdf(file_obj):
+    """Helper to extract text from the uploaded PDF object."""
     try:
+        reader = pypdf.PdfReader(file_obj)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() or ""
+        return text
+    except Exception as e:
+        return f"Error reading PDF: {e}"
+
+def generate_draft(context, user_prompt):
+    """Call OpenAI or Fallback to Simulation."""
+    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+    
+    if not api_key:
+        return (
+            f"⚠️ SYSTEM: No API Key found in .env or environment.\n\n"
+            f"We successfully read the file.\n"
+            f"--- START CONTEXT ---\n{context[:1000]}...\n--- END CONTEXT ---\n\n"
+            f"(To get real AI analysis, add OPENAI_API_KEY to your .env file and restart)"
+        )
+    
+    # DEBUG: Show user which key is active (last 4 digits only)
+    if len(api_key) > 4:
+        st.toast(f"🔑 Authenticating with key ending in: ...{api_key[-4:]}", icon="🔒")
+
+    try:
+        client = OpenAI(api_key=api_key)
         response = client.chat.completions.create(
-            model="gpt-4o-mini", # Use a smaller model to catch more errors
+            model="gpt-4o-mini", 
             messages=[
-                {"role": "system", "content": "You are a junior financial analyst. Be concise."},
-                {"role": "user", "content": full_prompt}
-            ],
-            temperature=0.7
+                {"role": "system", "content": "You are a junior financial analyst. Use the provided context to answer the user prompt."},
+                {"role": "user", "content": f"Context: {context[:15000]}... \n\n Instruction: {user_prompt}"}
+            ]
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"Error: {e}"
+        return f"OpenAI API Error: {str(e)}"
 
-def save_entry(entry):
-    with open(DATA_FILE, "a") as f:
-        f.write(json.dumps(entry) + "\n")
-
-def highlight_diff(text1, text2):
-    """Calculates the difference and returns HTML for visual rendering"""
-    d = difflib.Differ()
-    diff = list(d.compare(text1.splitlines(), text2.splitlines()))
-    html = []
-    for line in diff:
-        if line.startswith('+ '):
-            html.append(f'<span style="background-color:#e6ffec; color:#155724;">{line}</span>')
-        elif line.startswith('- '):
-            html.append(f'<span style="background-color:#f8d7da; color:#721c24; text-decoration: line-through;">{line}</span>')
-        elif line.startswith('? '):
-            continue
-        else:
-            html.append(line)
-    return "<br>".join(html)
-
-# --- SIDEBAR: PDF & STATS ---
+# --- 4. Sidebar (Data & Config) ---
 with st.sidebar:
-    st.header("1. Source Document")
-    uploaded_file = st.file_uploader("Upload 10-K / Research Note", type="pdf")
+    st.header("🧬 Data Management")
+    st.metric("Pairs Collected", len(st.session_state.dataset))
     
-    pdf_text = ""
-    if uploaded_file:
-        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-            for page in doc:
-                pdf_text += page.get_text()
-        st.success(f"Loaded {len(pdf_text)} chars")
-        with st.expander("📄 View Extracted Text"):
-            st.text(pdf_text[:1000] + "...")
+    if st.button("Download .JSONL"):
+        json_str = "\n".join([json.dumps(x) for x in st.session_state.dataset])
+        st.download_button(
+            label="Save File",
+            data=json_str,
+            file_name="dpo_dataset.jsonl",
+            mime="application/json"
+        )
+    st.divider()
+    
+    st.markdown("### 🛠️ Instructions")
+    st.info("1. Upload PDF\n2. Generate Draft\n3. Edit to 'Gold Standard'\n4. Tag & Save")
     
     st.divider()
     
-    # Dataset Stats
-    if os.path.exists(DATA_FILE):
-        count = sum(1 for _ in open(DATA_FILE))
-    else:
-        count = 0
-    st.metric("🧬 Training Pairs", count)
+    # --- TECH STACK SECTION ---
+    st.markdown("### 🏗️ Tech Stack")
+    st.markdown("""
+    ![Python](https://img.shields.io/badge/Python-3.11-blue?style=flat&logo=python&logoColor=white)
+    ![Streamlit](https://img.shields.io/badge/Frontend-Streamlit-FF4B4B?style=flat&logo=streamlit&logoColor=white)
+    ![OpenAI](https://img.shields.io/badge/Model-GPT--4o-412991?style=flat&logo=openai&logoColor=white)
+    ![DPO](https://img.shields.io/badge/Method-DPO%20%2F%20RLHF-orange?style=flat)
+    ![Pandas](https://img.shields.io/badge/Data-Pandas%20%2F%20JSONL-150458?style=flat&logo=pandas&logoColor=white)
+    """)
 
-# --- MAIN WORKSPACE ---
-st.title("Financial RLHF Studio 🔬")
-st.caption("Context-Aware Fine-Tuning Environment")
+# --- 5. Main Layout ---
 
-# SECTION 1: TASK DEFINITION
-col_task, col_go = st.columns([4, 1])
-with col_task:
-    prompt_input = st.text_input("Analyst Instruction", placeholder="e.g., Summarize the legal risks mentioned in this document.")
-with col_go:
-    st.write("") 
-    if st.button("🚀 Generate Draft", type="primary", use_container_width=True):
-        if not pdf_text:
-            st.error("Please upload a PDF first.")
-        elif not prompt_input:
-            st.error("Please enter an instruction.")
+# Custom HTML Header
+st.markdown("""
+<div class="custom-header">
+    <h1>🧬 Financial RLHF Studio</h1>
+    <p>Direct Preference Optimization (DPO) Data Engine | Institutional Grade Alignment</p>
+</div>
+""", unsafe_allow_html=True)
+
+# --- ROW 1: Context & Translation ---
+doc_col1, doc_col2 = st.columns(2)
+
+with doc_col1:
+    with st.expander("ℹ️ System Overview (DPO)", expanded=False):
+        st.markdown("""
+        **Objective:** Create a Direct Preference Optimization (DPO) dataset.
+        * **Rejected:** Baseline Model Output (Generic).
+        * **Chosen:** Expert Human Revision (Specific).
+        
+        This aligns the model with institutional standards by capturing corrections in real-time.
+        """)
+
+with doc_col2:
+    with st.expander("💼 Buy-Side Translation (The 'Why')", expanded=False):
+        st.markdown("""
+        <div style="font-size: 0.9em; font-style: italic; color: #444;">
+        <strong>Automated Analyst Training Program</strong>
+        <br>
+        1. <strong>The Intern (AI)</strong> writes a draft.
+        2. <strong>You (The PM)</strong> use the Red Pen to correct tone/nuance.
+        3. The system learns from your edits to automate the grunt work next time.
+        </div>
+        """, unsafe_allow_html=True)
+
+# --- ROW 2: Control Center ---
+with st.container(border=True):
+    st.markdown("#### 🎛️ Control Panel")
+    
+    input_c1, input_c2 = st.columns([1, 2])
+    
+    with input_c1:
+        uploaded_file = st.file_uploader("Source Context (PDF)", type="pdf", label_visibility="collapsed")
+        if not uploaded_file:
+            st.caption("📂 1. Upload Document")
         else:
-            with st.spinner("AI is thinking..."):
-                draft = generate_draft(pdf_text, prompt_input)
-                st.session_state['draft'] = draft
-                st.session_state['prompt'] = prompt_input
-                st.session_state['source'] = uploaded_file.name
+            st.caption(f"✅ {uploaded_file.name}")
 
-# SECTION 2: THE ANNOTATION INTERFACE
-if 'draft' in st.session_state:
-    st.divider()
-    
-    # Two-Column Layout
-    left, right = st.columns(2)
-    
-    with left:
-        st.subheader("🤖 AI Draft (Rejected)")
-        st.info("Original Model Output")
-        st.text_area("Read-Only", value=st.session_state['draft'], height=400, disabled=True, key="ai_out")
+    with input_c2:
+        # Layout: Prompt takes 85%, Button takes 15%
+        p_col, b_col = st.columns([6, 1])
         
-    with right:
-        st.subheader("👨‍💼 Expert Correction (Chosen)")
-        st.success("Your Gold-Standard Edit")
-        corrected_text = st.text_area("Edit Here", value=st.session_state['draft'], height=400, key="human_out")
+        with p_col:
+            prompt = st.text_input("Prompt", value="Summarize key risks in the MD&A.", label_visibility="collapsed")
+        
+        with b_col:
+            # Icon-only button to prevent wrapping
+            if st.button("⚡", type="primary", use_container_width=True, help="Run Generation"):
+                if not uploaded_file:
+                    st.error("Please upload a PDF first.")
+                else:
+                    with st.spinner("Reading & Generating..."):
+                        # 1. Read PDF
+                        raw_text = extract_text_from_pdf(uploaded_file)
+                        # 2. Call Logic
+                        st.session_state.ai_draft = generate_draft(raw_text, prompt)
+            
+            # Label below button
+            st.markdown("<div style='text-align: center; font-size: 0.75em; margin-top: -5px; color: #666;'>Generate</div>", unsafe_allow_html=True)
 
-    # SECTION 3: METADATA & DIFF
-    st.divider()
-    meta_col1, meta_col2 = st.columns([2, 1])
-    
-    with meta_col1:
-        st.markdown("#### 🔍 Change Visualization")
-        # Visual Diff Logic (Simple Comparison)
-        if corrected_text != st.session_state['draft']:
-            st.caption("Red = Deleted, Green = Added")
-            # We skip the complex HTML renderer for brevity, but you'd inject the 'highlight_diff' logic here
-            # For now, we show a simplified delta
-            len_diff = len(corrected_text) - len(st.session_state['draft'])
-            st.metric("Character Delta", f"{len_diff:+}", delta_color="normal")
-        else:
-            st.caption("No changes made yet.")
+# --- ROW 3: The Workbench ---
+if st.session_state.ai_draft:
+    with st.container(border=True):
+        st.markdown("#### ✍️ DPO Workbench")
+        
+        # Editors (Side by Side)
+        edit_c1, edit_c2 = st.columns(2)
+        
+        with edit_c1:
+            st.markdown("**🤖 Rejected (AI Draft)**")
+            draft_text = st.text_area("Rejected", value=st.session_state.ai_draft, height=200, label_visibility="collapsed", disabled=True)
+            
+        with edit_c2:
+            st.markdown("**🧑‍🏫 Chosen (Expert Rewrite)**")
+            expert_text = st.text_area("Chosen", value=st.session_state.ai_draft, height=200, label_visibility="collapsed")
 
-    with meta_col2:
-        st.markdown("#### 🏷️ Error Taxonomy")
-        errors = st.multiselect("Flag AI Errors", 
-            ["Hallucination", "Math Error", "Missed Nuance", "Tone Issue", "Look-ahead Bias", "GAAP/Non-GAAP Mixup"])
+        st.divider()
         
-        difficulty = st.select_slider("Correction Difficulty", options=["Trivial", "Moderate", "Deep Rewriting"])
+        # Actions
+        meta_c1, meta_c2 = st.columns([3, 1])
         
-        if st.button("💾 Save Training Pair", type="primary", use_container_width=True):
-            entry = {
-                "timestamp": datetime.now().isoformat(),
-                "source_doc": st.session_state.get('source', 'unknown'),
-                "prompt": st.session_state['prompt'],
-                "rejected": st.session_state['draft'],
-                "chosen": corrected_text,
-                "metadata": {
-                    "errors": errors,
-                    "difficulty": difficulty,
-                    "annotator": "Expert_User"
-                }
-            }
-            save_entry(entry)
-            st.balloons()
-            st.success("Data Point Saved to `data/dataset.jsonl`")
+        with meta_c1:
+            tags = st.multiselect(
+                "Error Taxonomy",
+                ["Hallucination", "Missed Nuance", "Incorrect Tone", "Math Error", "GAAP vs Non-GAAP", "Outdated Info"],
+                placeholder="Select error types..."
+            )
+            
+        with meta_c2:
+            st.write("") # Formatting spacer
+            st.write("")
+            if st.button("💾 Commit Pair", use_container_width=True):
+                if draft_text == expert_text:
+                    st.error("No changes detected.")
+                else:
+                    entry = {
+                        "timestamp": datetime.now().isoformat(),
+                        "prompt": prompt,
+                        "chosen": expert_text,
+                        "rejected": draft_text,
+                        "tags": tags,
+                        "source": uploaded_file.name if uploaded_file else "Manual"
+                    }
+                    st.session_state.dataset.append(entry)
+                    st.toast(f"Saved! Total pairs: {len(st.session_state.dataset)}", icon="✅")
+
+else:
+    st.info("👆 Upload a document and click the ⚡ button to begin.")
+
+# --- Footer ---
+st.caption("v0.3 | Financial RLHF Studio")
