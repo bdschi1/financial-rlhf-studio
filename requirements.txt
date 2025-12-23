@@ -2,3 +2,5 @@ streamlit
 openai
 python-dotenv
 pandas
+pymupdf
+diff-match-patch  # For the visual diffs
