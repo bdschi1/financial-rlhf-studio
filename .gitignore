@@ -1,8 +1,17 @@
-# --- Security (Critical) ---
+# --- Security (Critical) — NEVER commit these ---
 .env
+.env.local
+.env.*.local
+!.env.example
 secrets.toml
+secrets.yaml
+secrets.json
+*credentials*
 **/*.pem
 **/*.key
+
+# --- Claude Code ---
+.claude/
 
 # --- Python & Environment ---
 __pycache__/
@@ -24,6 +33,12 @@ data/*.pdf
 *.csv
 private_brad.txt
 
+# --- Results & Outputs ---
+results/
+RESULTS/
+outputs/
+*.log
+
 # --- Streamlit ---
 .streamlit/*
 !.streamlit/config.toml
@@ -32,4 +47,13 @@ private_brad.txt
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db.env
+Thumbs.db
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Internal / working documents (not for public repo) ---
+Fundamental.md
+fundamental.md
+b-notes.md
+TECHNICAL_DOCUMENTATION.md
