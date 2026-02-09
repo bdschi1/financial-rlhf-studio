@@ -1,6 +1,15 @@
+# --- Core UI ---
 streamlit
-openai
-python-dotenv
-pandas
-pymupdf
-diff-match-patch  # For the visual diffs
+streamlit-sortables>=0.3.1       # drag-and-drop ranking in K-Output mode
+
+# --- LLM Providers ---
+anthropic                        # Claude models
+openai                           # GPT-4o models
+google-genai                     # Gemini models
+
+# --- Document Processing ---
+pymupdf                          # PDF text extraction (fitz)
+python-dotenv                    # .env file loading for API keys
+
+# --- Data / Utilities ---
+pandas                           # JSONL stats in storage.py
