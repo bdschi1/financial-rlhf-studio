@@ -230,3 +230,14 @@ The context budget controls how many characters of the document are sent to the 
 **Hypothetical document:**
 An earnings transcript is 40,297 chars total — it fits entirely within the 60k default budget. No content lost. If you had a 633k-char MD&A section from a 10-K, the system would auto-chunk it into multiple pieces at the 60k budget --> navigate between chunks.
 
+---
+
+![Python](https://img.shields.io/badge/python-3.11+-3776AB?style=flat&logo=python&logoColor=white)
+
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat&logo=streamlit&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=flat&logo=pydantic&logoColor=white)
+![Anthropic](https://img.shields.io/badge/Anthropic-191919?style=flat&logo=anthropic&logoColor=white)
+![Google](https://img.shields.io/badge/Gemini-4285F4?style=flat&logo=google&logoColor=white)
+![OpenAI](https://img.shields.io/badge/OpenAI-412991?style=flat&logo=openai&logoColor=white)
+![PyMuPDF](https://img.shields.io/badge/PyMuPDF-009688?style=flat)
+
